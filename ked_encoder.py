@@ -69,8 +69,11 @@ class KEDEncoderWithSoftLabel(nn.Module):
         # 假设最后block输出特征数等于分类头输入
         self.hidden_size = self.backbone[-2][-1].out_channels if hasattr(self.backbone[-2][-1], 'out_channels') else 768
 
+    # 参数全部冻结（不参与训练）
+        for p in self.parameters():
+            p.requires_grad = False
 
-
+    @torch.no_grad()  # 前向推理不计算梯度
     def forward(self, x):
         # 1. 前向到分类头前，获得主干特征
         # 主干部分: 到最后一层head之前
