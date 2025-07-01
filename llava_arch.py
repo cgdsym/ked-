@@ -23,7 +23,7 @@ from .multimodal_projector.builder import build_ecg_projector
 
 from llava.constants import IGNORE_INDEX, ECG_TOKEN_INDEX, DEFAULT_ECG_PATCH_TOKEN, DEFAULT_ECG_START_TOKEN, DEFAULT_ECG_END_TOKEN
 
-
+from llava.mm_utils import get_anyres_image_grid_shape
 
 
 class LlavaMetaModel:
@@ -31,8 +31,6 @@ class LlavaMetaModel:
     def __init__(self, config):
         super(LlavaMetaModel, self).__init__(config)
 
- 
-        # ECG编码器与投影层
         self.ecg_tower = build_ecg_tower(
             pretrained_path=getattr(config, "ecg_pretrained_path", None),
             device=getattr(config, "device", "cuda")
@@ -60,18 +58,17 @@ class LlavaMetaModel:
         
         # 2. ECG编码器初始化及加载
         ecg_pretrained_path = getattr(model_args, "ecg_pretrained_path", None)
-        ecg_tower = None
         if getattr(self, "ecg_tower", None) is None:
             ecg_tower = build_ecg_tower(
                 pretrained_path=ecg_pretrained_path,
                 device=getattr(model_args, "device", "cuda")
             )
-            if fsdp is not None and hasattr(fsdp, "__len__") and len(fsdp) > 0:
+            if fsdp and hasattr(fsdp, "__len__") and len(fsdp) > 0:
                 self.ecg_tower = [ecg_tower]
             else:
                 self.ecg_tower = ecg_tower
         else:
-            if fsdp is not None and hasattr(fsdp, "__len__") and len(fsdp) > 0:
+            if fsdp and hasattr(fsdp, "__len__") and len(fsdp) > 0:
                 ecg_tower = self.ecg_tower[0]
             else:
                 ecg_tower = self.ecg_tower
@@ -95,14 +92,6 @@ class LlavaMetaModel:
             self.ecg_projector.load_state_dict(get_w(mm_projector_weights, "ecg_projector"))
 
 
-
-
-
-
-
-
-
-
     def encode_ecg(self, ecg_wave):
         """
         输入: ecg_wave, shape [B, 12, 5000]（或你的实际输入shape）
@@ -115,8 +104,35 @@ class LlavaMetaModel:
         projected_token_emb = self.ecg_projector(token_emb)  # [B, token_num, LLM_hidden_size]
         return projected_token_emb
 
-
-    
+# def unpad_image(tensor, original_size):
+#     """
+#     Unpads a PyTorch tensor of a padded and resized image.
+#
+#     Args:
+#     tensor (torch.Tensor): The image tensor, assumed to be in CxHxW format.
+#     original_size (tuple): The original size of PIL image (width, height).
+#
+#     Returns:
+#     torch.Tensor: The unpadded image tensor.
+#     """
+#     original_width, original_height = original_size
+#     current_height, current_width = tensor.shape[1:]
+#
+#     original_aspect_ratio = original_width / original_height
+#     current_aspect_ratio = current_width / current_height
+#
+#     if original_aspect_ratio > current_aspect_ratio:
+#         scale_factor = current_width / original_width
+#         new_height = int(original_height * scale_factor)
+#         padding = (current_height - new_height) // 2
+#         unpadded_tensor = tensor[:, padding:current_height - padding, :]
+#     else:
+#         scale_factor = current_height / original_height
+#         new_width = int(original_width * scale_factor)
+#         padding = (current_width - new_width) // 2
+#         unpadded_tensor = tensor[:, :, padding:current_width - padding]
+#
+#     return unpadded_tensor
 
 
 class LlavaMetaForCausalLM(ABC):
@@ -257,8 +273,6 @@ class LlavaMetaForCausalLM(ABC):
             position_ids = None
 
         return None, position_ids, attention_mask, past_key_values, new_input_embeds, new_labels
-
-
 
 
     def initialize_ecg_tokenizer(self, model_args, tokenizer):

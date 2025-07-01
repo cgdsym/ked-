@@ -54,18 +54,12 @@ IS_TOKENIZER_GREATER_THAN_0_14 = version.parse(tokenizers.__version__) >= versio
 
 @dataclass
 class ModelArguments:
-    #包含模型相关的参数，如模型路径、版本、是否冻结主干网络等
     model_name_or_path: Optional[str] = field(default="facebook/opt-125m")
     open_clip_config: str = field(default=None)
     version: Optional[str] = field(default="v0")
     freeze_backbone: bool = field(default=False)
     tune_mm_mlp_adapter: bool = field(default=False)
     ecg_tower: Optional[str] = field(default=None)
-    #
-    #ked_global_dim: int = field(default=512)
-    #ked_token_num: int = field(default=100)
-    ked_weight_path: Optional[str] = field(default=None)
-    #
     checkpoint_path: Optional[str] = field(default=None)
     # mm_vision_select_layer: Optional[int] = field(default=-1)   # default to the last layer
     pretrain_mm_mlp_adapter: Optional[str] = field(default=None)
@@ -78,7 +72,6 @@ class ModelArguments:
 
 @dataclass
 class DataArguments:
-    #包含数据相关的参数 指定数据路径、是否懒加载预处理、ECG文件夹路径和ECG序列长度等
     data_path: str = field(default=None,
                            metadata={"help": "Path to the training data."})
     lazy_preprocess: bool = False
@@ -89,7 +82,6 @@ class DataArguments:
 
 @dataclass
 class TrainingArguments(transformers.TrainingArguments):
-    #继承自HuggingFace的TrainingArguments 添加了量化、LoRA等特定参数
     cache_dir: Optional[str] = field(default=None)
     optim: str = field(default="adamw_torch")
     remove_unused_columns: bool = field(default=False)
@@ -125,11 +117,10 @@ class TrainingArguments(transformers.TrainingArguments):
     gradient_checkpointing: bool = True,
     gradient_checkpointing_kwargs = {"use_reentrant": False}
 
-#参数处理函数
+
 def maybe_zero_3(param, ignore_status=False, name=None):
     from deepspeed import zero
     from deepspeed.runtime.zero.partition_parameters import ZeroParamStatus
-    # 处理DeepSpeed Zero3优化下的参数
     if hasattr(param, "ds_id"):
         if param.ds_status == ZeroParamStatus.NOT_AVAILABLE:
             if not ignore_status:
@@ -141,7 +132,7 @@ def maybe_zero_3(param, ignore_status=False, name=None):
     return param
 
 
-# Borrowed from peft.utils.get_peft_model_state_dictLoRA状态获取函数
+# Borrowed from peft.utils.get_peft_model_state_dict
 def get_peft_state_maybe_zero_3(named_params, bias):
     if bias == "none":
         to_return = {k: t for k, t in named_params if "lora_" in k}
@@ -196,7 +187,7 @@ def find_all_linear_names(model):
         lora_module_names.remove('lm_head')
     return list(lora_module_names)
 
-#模型保存函数
+
 def safe_save_model_for_hf_trainer(trainer: transformers.Trainer,
                                    output_dir: str):
     """Collects the state dict and dump to disk."""
@@ -319,7 +310,7 @@ def _add_speaker_and_signal(header, source, get_conversation=True):
     conversation += BEGIN_SIGNAL
     return conversation
 
-#多模态预处理
+
 def preprocess_multimodal(
         sources: Sequence[str],
         data_args: DataArguments
@@ -344,7 +335,7 @@ def preprocess_multimodal(
 
     return sources
 
-#对话模板预处理
+
 def preprocess_llama_2(
         sources,
         tokenizer: transformers.PreTrainedTokenizer,
@@ -719,24 +710,19 @@ class LazySupervisedDataset(Dataset):
             ecg_folder = self.data_args.ecg_folder
             # processor = self.data_args.ecg_processor
             # image = Image.open(os.path.join(image_folder, image_file)).convert('RGB')
-#############################################################################################读取ecg信号 zscore归一化 通道交换
             ecg = wfdb.rdsamp(os.path.join(ecg_folder, ecg_file))[0]
             ecg[np.isnan(ecg)] = 0
             ecg[np.isinf(ecg)] = 0
             ecg = torch.Tensor(np.transpose(ecg, (1, 0)).astype(np.float32))
-
-                        
             # 1. mimic-iv路径，交换avf（第5导联，索引4）和avl（第4导联，索引5）
             if 'mimic-iv' in ecg_file.lower() or 'mimic-iv' in ecg_folder.lower():
                 # 交换第5和第6行（Python下标从0开始，即4和5）
                 ecg[[4, 5], :] = ecg[[5, 4], :]
-
-            # # 2. z-score归一化（每个通道单独处理）
-            # mean = ecg.mean(dim=1, keepdim=True)
-            # std = ecg.std(dim=1, keepdim=True)
-            # std[std == 0] = 1  # 防止除零
-            # ecg = (ecg - mean) / std
-
+            # 2. z-score归一化（每个通道单独处理）
+            mean = ecg.mean(dim=1, keepdim=True)
+            std = ecg.std(dim=1, keepdim=True)
+            std[std == 0] = 1  # 防止除零
+            ecg = (ecg - mean) / std
             c, length = ecg.shape
             seq_length = self.data_args.ecg_seq_length
             if length < seq_length:
@@ -745,8 +731,6 @@ class LazySupervisedDataset(Dataset):
                 ecg = new_ecg
             elif length > seq_length:
                 ecg = ecg[:, 0:seq_length]
-
-
             sources = preprocess_multimodal(
                 copy.deepcopy([e["conversations"] for e in sources]),
                 self.data_args)
@@ -817,16 +801,14 @@ def make_supervised_data_module(tokenizer: transformers.PreTrainedTokenizer,
 
 def train(attn_implementation=None):
     global local_rank
-    #参数解析
+
     parser = transformers.HfArgumentParser(
         (ModelArguments, DataArguments, TrainingArguments))
     model_args, data_args, training_args = parser.parse_args_into_dataclasses()
-    # 初始化配置
     local_rank = training_args.local_rank
     compute_dtype = (torch.float16 if training_args.fp16 else (torch.bfloat16 if training_args.bf16 else torch.float32))
 
     bnb_model_from_pretrained_args = {}
-    #量化配置（4/8-bit）
     if training_args.bits in [4, 8]:
         from transformers import BitsAndBytesConfig
         bnb_model_from_pretrained_args.update(dict(
@@ -844,7 +826,7 @@ def train(attn_implementation=None):
                 bnb_4bit_quant_type=training_args.quant_type  # {'fp4', 'nf4'}
             )
         ))
-    #加载预训练模型 如果指定ECG模块（多模态），加载LlavaLlamaForCausalLM,否则加载标准LlamaForCausalLM
+
     if model_args.ecg_tower is not None:
         if 'mpt' in model_args.model_name_or_path:
             config = transformers.AutoConfig.from_pretrained(model_args.model_name_or_path, trust_remote_code=True)
@@ -859,6 +841,7 @@ def train(attn_implementation=None):
             model = LlavaLlamaForCausalLM.from_pretrained(
                 model_args.model_name_or_path,
                 cache_dir=training_args.cache_dir,
+                attn_implementation=attn_implementation,
                 torch_dtype=(torch.bfloat16 if training_args.bf16 else None),
                 **bnb_model_from_pretrained_args
             )
@@ -866,20 +849,21 @@ def train(attn_implementation=None):
         model = transformers.LlamaForCausalLM.from_pretrained(
             model_args.model_name_or_path,
             cache_dir=training_args.cache_dir,
+            attn_implementation=attn_implementation,
             torch_dtype=(torch.bfloat16 if training_args.bf16 else None),
             **bnb_model_from_pretrained_args
         )
     model.config.use_cache = False
-    #模型冻结设置
+
     if model_args.freeze_backbone:
         model.model.requires_grad_(False)
-    #准备量化训练
+
     if training_args.bits in [4, 8]:
         from peft import prepare_model_for_kbit_training
         model.config.torch_dtype = (
             torch.float32 if training_args.fp16 else (torch.bfloat16 if training_args.bf16 else torch.float32))
         model = prepare_model_for_kbit_training(model, use_gradient_checkpointing=training_args.gradient_checkpointing)
-    #梯度检查点配置
+
     if training_args.gradient_checkpointing:
         if hasattr(model, "enable_input_require_grads"):
             model.enable_input_require_grads()
@@ -888,7 +872,7 @@ def train(attn_implementation=None):
                 output.requires_grad_(True)
 
             model.get_input_embeddings().register_forward_hook(make_inputs_require_grad)
-    #LoRA适配器配置
+
     if training_args.lora_enable:
         from peft import LoraConfig, get_peft_model
         lora_config = LoraConfig(
@@ -906,7 +890,7 @@ def train(attn_implementation=None):
                 model.to(torch.float16)
         rank0_print("Adding LoRA adapters...")
         model = get_peft_model(model, lora_config)
-    #分词器加载与配置
+
     if 'mpt' in model_args.model_name_or_path:
         tokenizer = transformers.AutoTokenizer.from_pretrained(
             model_args.model_name_or_path,
@@ -938,19 +922,19 @@ def train(attn_implementation=None):
             conversation_lib.default_conversation = conversation_lib.conv_templates[model_args.version]
         else:
             conversation_lib.default_conversation = conversation_lib.conv_templates["vicuna_v1"]
-    #多模态模块初始化
+
     if model_args.ecg_tower is not None:
         model.get_model().initialize_ecg_modules(
             model_args=model_args,
             fsdp=training_args.fsdp
         )
-        #ECG编码器
+
         ecg_tower = model.get_ecg_tower()
         ecg_tower.to(dtype=torch.bfloat16 if training_args.bf16 else torch.float16, device=training_args.device)
 
         # data_args.ecg_processor = ecg_tower.ecg_processor
         data_args.is_multimodal = True
-        #分词器
+
         # model.config.image_aspect_ratio = data_args.image_aspect_ratio
         model.config.tokenizer_padding_side = tokenizer.padding_side
         model.config.tokenizer_model_max_length = tokenizer.model_max_length
@@ -958,7 +942,6 @@ def train(attn_implementation=None):
         model.config.tune_mm_mlp_adapter = training_args.tune_mm_mlp_adapter = model_args.tune_mm_mlp_adapter
         if model_args.tune_mm_mlp_adapter:
             model.requires_grad_(False)
-            #配置跨模态投影器
             for p in model.get_model().mm_projector.parameters():
                 p.requires_grad = True
 
@@ -988,15 +971,14 @@ def train(attn_implementation=None):
                 if hasattr(module, 'weight'):
                     if training_args.bf16 and module.weight.dtype == torch.float32:
                         module = module.to(torch.bfloat16)
-    #数据模块准备
+
     data_module = make_supervised_data_module(tokenizer=tokenizer,
                                               data_args=data_args)
-    #训练器初始化
     trainer = LLaVATrainer(model=model,
                            tokenizer=tokenizer,
                            args=training_args,
                            **data_module)
-    #训练执行
+
     if list(pathlib.Path(training_args.output_dir).glob("checkpoint-*")):
         trainer.train(resume_from_checkpoint=True)
     else:
@@ -1004,7 +986,7 @@ def train(attn_implementation=None):
     trainer.save_state()
 
     model.config.use_cache = True
-    #模型保存
+
     if training_args.lora_enable:
         state_dict = get_peft_state_maybe_zero_3(
             model.named_parameters(), training_args.lora_bias
