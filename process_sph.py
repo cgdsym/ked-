@@ -1,7 +1,7 @@
 import pandas as pd
 import numpy as np
 import os
-
+import re
 from tqdm import tqdm
 import wfdb
 
@@ -33,6 +33,14 @@ def generate_english_labels(X_aha_codes, path):
             text_list.append(t)
         texts.append("; ".join(text_list))
     return texts
+
+def split_snomed_codes(x):
+    # 支持 , 和 ; 两种分隔符，去除前导0
+    if pd.isna(x):
+        return []
+    codes = re.split(r'[;]', str(x))
+    # 去除空字符串和前导0
+    return [str(int(code.strip())) for code in codes if code.strip().isdigit() and int(code.strip()) != 0]
 
 def prepare(args):
     path = args.data_dir
@@ -66,15 +74,15 @@ def prepare(args):
 
 
     df = pd.DataFrame(X_label, columns=["label"])
-    df_train['label']=df
+    df_train['label']=df['label'].apply(split_snomed_codes)
     print(df_train[['path', 'label']].head(5))
 
     df = pd.DataFrame(Y_label, columns=["label"])
-    df_test['label']=df
+    df_test['label']=df['label'].apply(split_snomed_codes)
     print(df_test[['path', 'label']].head(20))
 
-    df_train[['path', 'label']].to_csv(f'/data_C/sdb1/lyi/ECG-Chat-master/data/sph/train.csv',index=False)
-    df_test[['path', 'label']].to_csv(f'/data_C/sdb1/lyi/ECG-Chat-master/data/sph/test.csv',index=False)
+    # df_train[['path', 'label']].to_csv(f'/data_C/sdb1/lyi/ECG-Chat-master/data/sph/train.csv',index=False)
+    # df_test[['path', 'label']].to_csv(f'/data_C/sdb1/lyi/ECG-Chat-master/data/sph/test.csv',index=False)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
