@@ -10,7 +10,7 @@ import os
 import scipy.io
 from scipy.signal import resample
 
-data_path = "."
+data_path = "/data_C/sdb1/lyi/ECGFM-KED-main/dataset/cpsc/training_set/"
 def preprocess_physionet(data_path):
     """
     before running this data preparing code,
@@ -31,11 +31,12 @@ def preprocess_physionet(data_path):
     label_ls = []
     for i, filename in enumerate(filenames):
         mat = scipy.io.loadmat(os.path.join(data_path, '{0}.mat'.format(filename)))
-        mat = np.array(mat['ECG'][0][0][2]) # (12,7500)
+        mat = np.array(mat['val']) # (12,7500)
         # print(mat)
         # print(mat.shape)
         # mat = mat[1, :]
         mat = resample(mat, int(mat.shape[1] / 5), axis=1) # (12,7500)
+        #mat = resample(mat, 5000, axis=1) 
         mat = mat.transpose((1, 0))
         # print(mat.shape)
         mat1 = np.zeros((1000, 12))
@@ -73,8 +74,8 @@ def preprocess_physionet(data_path):
             all_data.append(mat1)
     all_data = np.array(all_data)
     label_ls = np.array(label_ls)
-    np.save("test_ICBEB_signal", all_data)
-    np.save("test_ICBEB_label_9", label_ls)
+    np.save("/data_C/sdb1/lyi/ECGFM-KED-main/dataset/cpsc/test_ICBEB_signal", all_data)
+    np.save("/data_C/sdb1/lyi/ECGFM-KED-main/dataset/cpsc/test_ICBEB_label_9", label_ls)
 
 
 if __name__ == '__main__':
